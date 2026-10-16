@@ -1,0 +1,21 @@
+{
+  "name": "mac-sandbox-control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API-first macOS VM orchestration for trusted development, with MCP and a CLI",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "check:public": "node scripts/check-public.mjs",
+    "host:install": "node scripts/host-install.mjs",
+    "host:start": "node scripts/host-services.mjs start",
+    "host:stop": "node scripts/host-services.mjs stop",
+    "template:create": "node scripts/init-template.mjs",
+    "client:install": "node scripts/client-install.mjs",
+    "start": "node server.mjs",
+    "mcp": "node mcp-http.mjs"
+  },
+  "repository": { "type": "git", "url": "https://github.com/different-ai/mac-sandbox-control.git" }
+}

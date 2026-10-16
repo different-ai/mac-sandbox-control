@@ -1,0 +1,25 @@
+#!/usr/bin/expect -f
+# First access to the factory VM only. Lume documents lume/lume as its temporary
+# unattended bootstrap account. It is replaced/disabled by build-template.mjs.
+# No operator password or token appears in this script or command arguments.
+set timeout 30
+log_user 0
+set env(TERM) xterm
+if {[llength $argv] != 4} {exit 2}
+lassign $argv ip hosts alias command
+spawn -noecho /usr/bin/ssh -tt -o PubkeyAuthentication=no -o PreferredAuthentications=password -o KbdInteractiveAuthentication=no -o NumberOfPasswordPrompts=1 -o ConnectTimeout=8 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$hosts -o HostKeyAlias=$alias lume@$ip $command
+set matched 0
+expect -exact "password:" {set matched 1}
+if {!$matched} {exit 124}
+send -- lume
+send -- [format %c 13]
+set matched 0
+expect -exact "__BOOTSTRAP_SUDO__" {set matched 1}
+if {!$matched} {exit 124}
+send -- lume
+send -- [format %c 13]
+set finished 0
+expect eof {set finished 1}
+if {!$finished} {exit 124}
+set result [wait]
+exit [lindex $result 3]

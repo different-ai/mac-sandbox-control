@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mac sandboxes</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div class="title"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg><h1>Mac sandboxes</h1></div>
+      <div class="connection"><span class="dot" id="connection-dot"></span><span id="connection">Connecting</span></div>
+    </header>
+    <section class="host" aria-label="Host capacity">
+      <div><span class="muted">Active slots</span><strong id="running">— / 2</strong></div>
+      <div><span class="muted">Allocated memory</span><strong id="memory">—</strong></div>
+      <div><span class="muted">Available storage</span><strong id="storage">—</strong></div>
+      <div><span class="muted">Host</span><strong id="host">Mac host</strong></div>
+    </section>
+    <div class="notice" id="isolation"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span>LAN isolation not verified. Use trusted workloads only.</span></div>
+    <div class="notice" id="template-state" hidden>Template not ready. Creation is blocked until the host administrator verifies provisioning.</div>
+    <div class="section-heading"><h2>Sandboxes</h2><div><span id="slot-note" class="slot-note" hidden>Both slots in use. Stop a sandbox to create another.</span><button id="create" class="primary" disabled>Create sandbox</button></div></div>
+    <div id="error" role="alert" hidden></div>
+    <div id="sandboxes" aria-live="polite" aria-busy="true"><div class="skeleton"></div><div class="skeleton"></div></div>
+    <details class="activity"><summary>Recent activity <span id="job-count"></span></summary><ol id="jobs"></ol></details>
+    <footer><span id="verified">Not verified yet</span><span>Private access through SSH</span></footer>
+  </main>
+  <dialog id="create-dialog" aria-labelledby="create-title">
+    <form id="create-form">
+      <h2 id="create-title">Create sandbox</h2>
+      <label for="name">Name</label><input id="name" name="name" pattern="space-[a-z0-9][a-z0-9-]{0,30}" maxlength="37" required placeholder="space-3" autocomplete="off">
+      <p class="muted">8 CPU cores · 14 GB memory · 150 GB virtual disk</p>
+      <p class="muted">Network access is not restricted to the internet. Only run trusted workloads.</p>
+      <div class="dialog-actions"><button type="button" data-close="create-dialog">Cancel</button><button class="primary" type="submit">Create sandbox</button></div>
+    </form>
+  </dialog>
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <form id="delete-form">
+      <h2 id="delete-title">Delete sandbox</h2><p id="delete-warning"></p>
+      <label for="confirmation">Type the sandbox name to delete its files permanently</label><input id="confirmation" autocomplete="off" required>
+      <div class="dialog-actions"><button type="button" data-close="delete-dialog">Keep sandbox</button><button class="destructive" type="submit">Delete sandbox</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

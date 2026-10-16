@@ -1,0 +1,27 @@
+name: Test and publication hygiene
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Tests (fake VM processes; no host or credentials)
+        run: node --test *.test.mjs
+      - name: Public source hygiene
+        run: node scripts/check-public.mjs
+      - name: Syntax checks
+        run: |
+          find . -name '*.mjs' -not -path './.git/*' -print0 | xargs -0 -n 1 node --check
+          sh -n provision.sh
+          sh -n power.sh

@@ -1,0 +1,33 @@
+#!/usr/bin/expect -f
+# Drive hidden password prompts over a pinned, key-authenticated SSH TTY.
+# argv: user ip key hosts alias sudoFile answersFile command
+# answersFile: one secret per line, sent in order to non-sudo password prompts.
+# Secrets come only from private files; nothing secret appears in argv or logs.
+set timeout 60
+log_user 0
+set env(TERM) xterm
+if {[llength $argv] != 8} {exit 2}
+lassign $argv user ip key hosts alias sudoFile answersFile command
+set f [open $sudoFile r]; set sudoPw [string trimright [read $f] "\r\n"]; close $f
+set f [open $answersFile r]; set answers [split [string trimright [read $f] "\r\n"] "\n"]; close $f
+set index 0
+set transcript ""
+spawn -noecho /usr/bin/ssh -tt -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$hosts -o HostKeyAlias=$alias $user@$ip $command
+expect {
+  -exact "__SUDO__" {send -- $sudoPw; send -- [format %c 13]; exp_continue}
+  -re {(?i)password[^\r\n:]*:} {
+    if {$index >= [llength $answers]} {puts stderr "Unexpected extra password prompt."; exit 125}
+    send -- [lindex $answers $index]; send -- [format %c 13]; incr index; exp_continue
+  }
+  -re {[^\r\n]*\r?\n} {append transcript $expect_out(0,string); exp_continue}
+  eof {}
+  timeout {puts stderr "Timed out waiting for the guest."; exit 124}
+}
+set result [wait]
+foreach line [split $transcript "\n"] {
+  set clean [string trim $line]
+  if {$clean eq ""} continue
+  foreach secret [concat [list $sudoPw] $answers] {if {$secret ne ""} {set clean [string map [list $secret {[REDACTED]}] $clean]}}
+  puts $clean
+}
+exit [lindex $result 3]
