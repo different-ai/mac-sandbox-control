@@ -32,6 +32,10 @@ space-2  STOPPED  no      no    8    14 GB   150 GB
 
 Not implemented: per-VM user permissions, exclusive reservations, hostile-guest network containment, snapshots, TTL cleanup, automatic restart after a host reboot, or an MCP screenshot/click tool.
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) and [tracking issue #14](https://github.com/different-ai/mac-sandbox-control/issues/14) for planned reset/snapshot workflows, lifecycle hardening, team access, and multi-Mac scaling. The first step is evaluating existing Cua/Orchard backends before rebuilding their capabilities.
+
 ## Architecture
 
 ```mermaid
