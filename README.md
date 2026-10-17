@@ -29,6 +29,7 @@ space-2  STOPPED  no      no    8    14 GB   150 GB
 - **A compact dashboard:** localhost-only; use an SSH tunnel when viewing from another computer.
 - **Optional remote desktop:** a persistent upstream owner and standard RFB relay, with separate human/native passwords per VM. Disabled by default; see [setup and failure policy](docs/desktop-relay.md) and the [bounded real-Mac acceptance result](reports/reliability-2026-10-16.md).
 - **Persistent state:** SQLite jobs, conservative crash recovery, key pinning, and private per-VM credentials.
+- **Experimental browser-session transfer:** an operator-only, consented cookie/localStorage export/import CLI with an encrypted vault. A [controlled real-Chrome A → fresh B test](reports/browser-session-transfer-2026-10-16.md) passed without a second login; see [scope, setup and limits](docs/browser-sessions.md). Not arbitrary app/session migration.
 
 Not implemented: per-VM user permissions, exclusive reservations, hostile-guest network containment, snapshots, TTL cleanup, automatic restart after a host reboot, or an MCP screenshot/click tool.
 
