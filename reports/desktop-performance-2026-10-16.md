@@ -2,7 +2,7 @@
 
 ## Deployment status
 
-**Prepare only; no interruption authorized.** The running relay and both active guest VMs were left unchanged. Results for the revised relay below must not be represented as a deployed improvement or a real-Mac acceptance pass.
+Initial instruction was **prepare only**, and the initial tests left both live VMs unchanged. The user subsequently explicitly authorized a brief stop of both guests and deployment. After verifying no active lifecycle jobs, both guests were gracefully stopped, the relay source was backed up and replaced, and both were restarted successfully (the colleague's guest first). No VM disks were deleted. This deployment and the small live check below do **not** constitute a new reliability acceptance pass.
 
 The earlier 45.46-minute reliability acceptance applies to the earlier private deployment. It does not validate the performance revision.
 
@@ -44,7 +44,13 @@ The same revised source was also tested from an isolated preparation directory o
 
 JavaScript regression tests: **111 passed**. Publication hygiene and whitespace checks passed. Python dependency deprecation warnings remain.
 
-## Required acceptance before a live claim
+## Authorized deployment follow-up
+
+A read-only viewer connected to the revised live relay over Tailscale at 1920×1080. Its initial screen response was **641,583 bytes**. Four requests on the unchanged desktop returned **16 bytes total** (four valid empty-update messages), with a mean response of 1,239.13 ms and p95 of 1,338.24 ms. The empty replies wait for possible changes; that wait no longer blocks the independent input reader. This is not an input-to-photon, scrolling, or video benchmark. The earlier static baseline returned a full 8,294,416-byte screen for every update.
+
+The actual native macOS Screen Sharing client and a new lifecycle/reconnect soak still need validation. The completed 45.46-minute run remains evidence for the earlier revision only.
+
+## Required acceptance before a broad performance/reliability claim
 
 - Unit tests for compression stream continuity, raw fallback, pixel formats, partial requests, desktop resize, static updates, and input while a screen update is outstanding.
 - Same synthetic fixture and sample count, with pixel correctness checked separately; disclose that small flat-color changes compress unusually well.
