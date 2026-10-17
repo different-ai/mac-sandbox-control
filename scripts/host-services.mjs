@@ -8,10 +8,12 @@ if (action === '--help') {console.log('Usage: node scripts/host-services.mjs sta
 try {
   if (!['start', 'stop'].includes(action)) throw new Error('Expected start or stop.');
   if (process.platform !== 'darwin' || process.getuid() === 0) throw new Error('Run as the installed macOS user, not root.');
-  await loadHostConfig();
+  const config = await loadHostConfig();
   const domain = 'gui/' + process.getuid();
   execFileSync('/bin/launchctl', ['print', domain], {stdio: 'ignore'});
   for (const service of serviceEntries) {
+    // Stop checks every known label even if desktop was disabled since install.
+    if (action === 'start' && service.desktopOnly && !config.desktopEnabled) continue;
     let loaded = false;
     try {execFileSync('/bin/launchctl', ['print', domain + '/' + service.label], {stdio: 'ignore'}); loaded = true;} catch {}
     if (action === 'start') {

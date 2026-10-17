@@ -27,6 +27,20 @@ test('starting and unknown states do not become stopped or executable', () => {
   assert.equal(filterSandboxes([starting, unknown], 'stopped').length, 0);
 });
 
+test('crashed runtime is non-executable and non-running but remains conservatively active', () => {
+  const crashed = describeSandbox(vm('space-crashed', 'crashed', { runtime: { processState: 'dead', guestSsh: 'unverified' } }));
+  assert.equal(crashed.status, 'crashed'); assert.equal(crashed.state, 'crashed');
+  assert.equal(crashed.running, false); assert.equal(crashed.active, null); assert.equal(crashed.canExec, false);
+  assert.match(crashed.note, /operator inspection/);
+  assert.equal(filterSandboxes([crashed], 'active').length, 1);
+  assert.equal(filterSandboxes([crashed], 'running').length, 0);
+  assert.equal(filterSandboxes([crashed], 'stopped').length, 0);
+  assert.equal(stateCounts([crashed]).unknown, 1);
+  assert.match(formatSandboxTable([crashed]), /CRASHED\s+\?\s+no/);
+  assert.equal(describeSandbox(vm('space-unknown', 'unknown')).running, null);
+  assert.match(describeSandbox(vm('space-running', 'running')).note, /Guest SSH health is not verified/);
+});
+
 test('ls/ps filters and counts match explicit VM state', () => {
   const described = describeSandboxes([...rows, vm('space-start', 'stopped', {starting: true}), vm('space-unknown', 'unknown')]);
   assert.deepEqual(stateCounts(described), {total: 4, running: 1, stopped: 1, transitioning: 1, unknown: 1});

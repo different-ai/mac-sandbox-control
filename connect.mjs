@@ -4,6 +4,7 @@ import path from 'node:path';
 import {isIP} from 'node:net';
 import {pathToFileURL} from 'node:url';
 import {execFileSync, spawn} from 'node:child_process';
+import {parseLumeJSON} from './lume-json.mjs';
 
 export class ConnectError extends Error {}
 export function connectionArgs(name, {home = defaultHome, stateDir = home === defaultHome ? stateRoot : path.join(home, '.local/state/mac-sandboxes'), getVM} = {}) {
@@ -19,7 +20,7 @@ export function connectionArgs(name, {home = defaultHome, stateDir = home === de
   if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(credential.username || '')) throw new ConnectError(`${name}: guest account information needs operator inspection.`);
   let vm;
   try {
-    const raw = getVM ? getVM(name) : JSON.parse(execFileSync(lumeBin, ['get', name, '--format', 'json', '--storage', storageRoot], {encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore']}));
+    const raw = getVM ? getVM(name) : parseLumeJSON(execFileSync(lumeBin, ['get', name, '--format', 'json', '--storage', storageRoot], {encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore']}));
     vm = Array.isArray(raw) ? raw[0] : raw;
   } catch {throw new ConnectError(`${name}: could not verify VM state. Check the host diagnostics before connecting.`);}
   if (vm?.name !== name) throw new ConnectError(`${name}: VM identity could not be verified.`);

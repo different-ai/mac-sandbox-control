@@ -8,6 +8,7 @@ import { Controller, GiB, parseInventory } from './controller.mjs';
 import { createServer } from './server.mjs';
 import { runCli } from './cli.mjs';
 import { handle as mcpHandle, tools as mcpTools } from './mcp.mjs';
+import { describeSandboxes, filterSandboxes } from './sandbox-status.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 function vm(name, status = 'stopped', memory = 14) {
@@ -22,7 +23,10 @@ function fixture(t, overrides = {}) {
   const calls = [];
   const options = { stateDir: join(root, 'control'), storage: root, lume: join(root, 'fake-lume'),
     provisioner: join(root, 'fake-provision'), powerHelper: join(root, 'fake-power'),
-    desktopEnabled: true, resources: () => ({ cpuTotal: 18, memoryGiB: 36, diskGiB: 100, diskTotalGiB: 500 }),
+    desktopEnabled: true, guestProbe: async () => true,
+    consoleCheck: () => ({ready: true, connected: true, reason: 'ready'}), resources: () => ({ cpuTotal: 18, memoryGiB: 36, diskGiB: 100, diskTotalGiB: 500 }),
+    // Lifecycle fixtures model runtime independently of macOS process tools.
+    runtimeInspector: async row => ({ status: row.status, processState: row.status === 'running' ? 'running' : 'stopped' }),
     bootTimeoutMs: 5, pollMs: 1, ...overrides };
   const fake = { rows, calls, failure: null, delayed: new Set(), peak: 0, active: 0, serialPeak: 0 };
   fake.runner = async (file, args, config) => {
@@ -89,9 +93,9 @@ test('concurrent creates serialize, never exceed two, and use exact safe Lume ar
   assert.deepEqual(commands.find(args => args[0] === 'set'), ['set', 'space-a', '--storage', options.storage, '--cpu', '8', '--memory', '14GB', '--machine-identifier', 'random', '--mac-address', 'random']);
   const run = commands.find(args => args[0] === 'run');
   assert.deepEqual(run.slice(0, 8), ['run', 'space-a', '--storage', options.storage, '--display', 'none', '--vnc', 'enabled']);
-  assert.equal(run[8], '--vnc-port'); assert.equal(run[9], '5901'); assert.equal(run[10], '--vnc-password'); assert.match(run[11], /^[A-Za-z0-9]{8}$/);
+  assert.equal(run[8], '--vnc-port'); assert.equal(run[9], '15901'); assert.equal(run[10], '--vnc-password'); assert.match(run[11], /^[A-Za-z0-9]{8}$/);
   assert.deepEqual(run.slice(12), ['--detach', '--log-file', '/dev/null']);
-  const runB = commands.filter(args => args[0] === 'run')[1]; assert.equal(runB[9], '5902'); assert.notEqual(runB[11], run[11]);
+  const runB = commands.filter(args => args[0] === 'run')[1]; assert.equal(runB[9], '15902'); assert.notEqual(runB[11], run[11]);
   assert(commands.every(args => !args.includes('--disk-size')));
   const state = await c.state();
   assert.equal(state.policy.networkIsolationVerified, false); assert.equal(state.host.diskAvailableGiB, 100);
@@ -179,7 +183,8 @@ test('confirmed deletion removes owned credentials and permits safe name reuse',
   assert.equal((await action(c, 'space-reuse', 'stop')).status, 'succeeded');
   for (const folder of ['keys', 'credentials']) mkdirSync(join(root, folder), {recursive: true, mode: 0o700});
   const files = [join(root, 'keys/space-reuse'), join(root, 'keys/space-reuse.pub'),
-    join(root, 'space-reuse.known_hosts'), join(root, 'credentials/space-reuse.json'), join(root, 'credentials/space-reuse.vnc')];
+    join(root, 'space-reuse.known_hosts'), join(root, 'credentials/space-reuse.json'), join(root, 'credentials/space-reuse.vnc'),
+    join(root, 'credentials/space-reuse.vnc-upstream')];
   for (const file of files) writeFileSync(file, 'fixture-only', {mode: 0o600});
   assert.equal((await action(c, 'space-reuse', 'delete', 'space-reuse')).status, 'succeeded');
   for (const file of files) assert(!existsSync(file));
@@ -456,7 +461,7 @@ test('MCP run_command and get_login call the right places; connection_info gives
     calls.push({ url, options });
     if (url.endsWith('/api/state')) return new Response(JSON.stringify({ csrfToken: 'C' }));
     if (url.endsWith('/exec')) return new Response(JSON.stringify({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }));
-    return new Response(JSON.stringify({ sandbox: { name: 'space-a', status: 'running', securityReady: true } }));
+    return new Response(JSON.stringify({ sandbox: { name: 'space-a', status: 'running', securityReady: true, desktopState: {ready: true, connected: true, port: 5901} } }));
   };
   const r = await callTool('run_command', { name: 'space-a', command: 'sw_vers', timeout_seconds: 30 }, request);
   assert.equal(r.stdout, 'ok');
@@ -500,8 +505,203 @@ test('controller helpers share the configured root and desktop policy', async t 
   assert.equal(call.config.env.SANDBOX_DESKTOP_ENABLED, '0');
 });
 
+test('desktop credentials and helper environment honor a state root separate from control directory', async t => {
+  const {c, fake, root} = fixture(t);
+  c.stateRoot = join(root, 'separate-private-root');
+  assert.equal((await action(c, 'space-root', 'create')).status, 'succeeded');
+  assert(existsSync(join(c.stateRoot, 'credentials/space-root.vnc')));
+  assert(existsSync(join(c.stateRoot, 'credentials/space-root.vnc-upstream')));
+  const run = fake.calls.find(call => call.args[0] === 'run');
+  assert.equal(run.config.env.SANDBOX_STATE_ROOT, c.stateRoot);
+  assert.equal(run.config.env.SANDBOX_STATE_DIR, join(root, 'control'));
+  assert.equal((await action(c, 'space-root', 'stop')).status, 'succeeded');
+  assert.equal((await action(c, 'space-root', 'delete', 'space-root')).status, 'succeeded');
+  assert(!existsSync(join(c.stateRoot, 'credentials/space-root.vnc-upstream')));
+});
+
 test('large hosts are not incorrectly clamped to a private host memory size', async t => {
   const {c, fake} = fixture(t, {resources: () => ({cpuTotal: 32, memoryGiB: 128, diskGiB: 300})});
   fake.rows.push(vm('unmanaged', 'running', 32));
   assert.equal((await action(c, 'space-large', 'create')).status, 'succeeded');
+});
+
+test('runtime overrides stale Lume running and blocks SSH, start, delete and capacity release', async t => {
+  for (const status of ['crashed', 'unknown']) {
+    await t.test(status, async t => {
+      const { c, fake } = fixture(t, { runtimeInspector: async row => ({
+        status: row.name === 'macos-template' ? 'stopped' : status,
+        processState: row.name === 'macos-template' ? 'stopped' : status === 'crashed' ? 'dead' : 'unknown',
+      }) });
+      seed(c, 'space-stale'); fake.rows.push(vm('space-stale', 'running'), vm('unmanaged-stale', 'running'));
+      c.execRunner = async () => assert.fail('No SSH for unproved runtime');
+      await assert.rejects(c.exec('space-stale', 'true'), /not running/);
+      const state = await c.state(), row = state.sandboxes[0];
+      assert.equal(row.status, status); assert.equal(row.ipAddress, null);
+      assert.equal(row.runtime.guestSsh, 'unverified'); assert.equal(state.inventory.activeCount, 2);
+      const described = describeSandboxes(state.sandboxes, state.inventory);
+      assert.equal(described[0].canExec, false); assert.equal(described[0].active, null);
+      assert.equal(described[0].running, status === 'crashed' ? false : null);
+      assert.equal(filterSandboxes(described, 'active').length, 1);
+      assert.equal(filterSandboxes(described, 'running').length, 0);
+      assert.match((await action(c, 'space-stale', 'start')).error, /must be stopped/);
+      assert.match((await action(c, 'space-stale', 'delete', 'space-stale')).error, /Stop or kill/);
+      assert.match((await action(c, 'space-blocked', 'create')).error, /Maximum two/);
+      assert(fake.calls.every(call => call.args[0] === 'ls'), 'inspection never repairs, kills or restarts VMs');
+    });
+  }
+});
+
+test('injected runtime failures are unknown and never disclose provider diagnostics', async t => {
+  const { c, fake } = fixture(t, { runtimeInspector: async () => { throw new Error('SECRET_PROCESS_ARGS'); } });
+  seed(c, 'space-a'); fake.rows.push(vm('space-a', 'running'));
+  const state = await c.state();
+  assert.equal(state.sandboxes[0].status, 'unknown'); assert.equal(state.inventory.activeCount, 2);
+  assert(!JSON.stringify(state).includes('SECRET')); assert.equal(state.policy.templateReady, false);
+});
+
+test('incomplete or contradictory runtime provider proof cannot enable execution', async t => {
+  for (const health of [null, {}, { status: 'running' }, { status: 'running', processState: 'dead' }, { status: 'stopped', processState: 'unknown' }]) {
+    const { c, fake } = fixture(t, { runtimeInspector: async () => health });
+    seed(c, 'space-unproved'); fake.rows.push(vm('space-unproved', 'running'));
+    const state = await c.state();
+    assert.equal(state.sandboxes[0].status, 'unknown');
+    assert.equal(describeSandboxes(state.sandboxes, state.inventory)[0].canExec, false);
+  }
+});
+
+test('inventory and async runtime inspector use the configured custom storage and Lume path', async t => {
+  const inspected = [];
+  const { c, fake, options } = fixture(t, { runtimeInspector: async (row, context) => {
+    await Promise.resolve(); inspected.push({ row, context });
+    return { status: row.status, processState: row.status };
+  } });
+  await c.inventory();
+  assert.deepEqual(fake.calls[0].args, ['ls', '--storage', options.storage, '--format', 'json']);
+  assert.deepEqual(inspected[0].context, { storage: options.storage, lume: options.lume });
+});
+
+test('lifecycle completion invalidates a previously cached running inventory immediately', async t => {
+  const { c, fake } = fixture(t);
+  seed(c, 'space-cache'); fake.rows.push(vm('space-cache', 'running'));
+  assert.equal((await c.state()).sandboxes[0].status, 'running');
+  assert.equal((await action(c, 'space-cache', 'kill')).status, 'succeeded');
+  assert.equal((await c.state()).sandboxes[0].status, 'stopped');
+  assert.equal((await action(c, 'space-cache', 'start')).status, 'succeeded');
+  assert.equal((await c.state()).sandboxes[0].status, 'running');
+});
+
+test('a pre-completion in-flight inventory refresh cannot restore the old snapshot', async t => {
+  const { c, fake } = fixture(t);
+  seed(c, 'space-race'); fake.rows.push(vm('space-race', 'running'));
+  const original = c.inventory.bind(c);
+  let release, started;
+  const waiting = new Promise(resolve => { started = resolve; });
+  let first = true;
+  c.inventory = async () => {
+    const rows = await original();
+    if (first) { first = false; started(); await new Promise(resolve => { release = resolve; }); }
+    return rows;
+  };
+  const state = c.state(); await waiting;
+  assert.equal((await action(c, 'space-race', 'kill')).status, 'succeeded');
+  release();
+  assert.equal((await state).sandboxes[0].status, 'stopped');
+  assert.equal((await c.state()).sandboxes[0].status, 'stopped');
+});
+
+test('desktop boot uses distinct private upstream credentials, never human password in Lume argv', async t => {
+  const {c, fake, root} = fixture(t);
+  assert.equal((await action(c, 'space-relay', 'create')).status, 'succeeded');
+  const human = readFileSync(join(root, 'credentials/space-relay.vnc'), 'utf8');
+  const upstream = readFileSync(join(root, 'credentials/space-relay.vnc-upstream'), 'utf8');
+  assert.notEqual(human, upstream); assert.match(upstream, /^[A-Za-z0-9]{8}$/);
+  const run = fake.calls.find(call => call.args[0] === 'run').args;
+  assert.equal(run[run.indexOf('--vnc-password') + 1], upstream); assert(!run.includes(human));
+  assert.equal(run[run.indexOf('--vnc-port') + 1], '15901');
+  assert.deepEqual(c.desktopFor('space-relay'), {port: 5901, password: human, upstreamPassword: upstream});
+});
+
+test('console faults retain partial-boot reservation without killing or retrying compute', async t => {
+  const {c, fake} = fixture(t, {consoleCheck: () => ({ready: false, connected: false, reason: 'stale', error: 'SECRET'})});
+  const result = await action(c, 'space-partial', 'create');
+  assert.equal(result.status, 'failed'); assert.match(result.error, /not ready/);
+  assert.equal(c.owned('space-partial').reserved, 1);
+  const row = (await c.state()).sandboxes[0];
+  assert.equal(row.status, 'running'); assert.equal(row.desktopState.ready, false); assert.equal(row.desktopState.reason, 'stale');
+  assert(!JSON.stringify(row).includes('SECRET'));
+  assert.match((await action(c, 'space-partial', 'start')).error, /unresolved/);
+  assert.equal(fake.calls.filter(call => call.args[0] === 'run').length, 1);
+  assert(!fake.calls.some(call => call.args[0] === 'stop'));
+});
+
+test('headless startup also waits for pinned guest SSH before releasing its reservation', async t => {
+  const {c, fake} = fixture(t, {desktopEnabled: false, guestProbe: async () => false});
+  assert.match((await action(c, 'space-ssh', 'create')).error, /Guest SSH/);
+  assert.equal(c.owned('space-ssh').reserved, 1);
+  assert.equal((await c.state()).sandboxes[0].status, 'running');
+  assert.equal(fake.calls.filter(call => call.args[0] === 'run').length, 1);
+});
+
+test('boot cannot finish on console proof alone; both probes succeed before reservation release', async t => {
+  let checks = 0;
+  const {c} = fixture(t, {bootTimeoutMs: 100, guestProbe: async () => ++checks > 1});
+  assert.equal((await action(c, 'space-both', 'create')).status, 'succeeded');
+  assert(checks >= 2); assert.equal(c.owned('space-both').reserved, 0);
+});
+
+test('MCP refuses console URL when compute runs but console is unready', async () => {
+  const {callTool} = await import('./mcp.mjs');
+  const request = async () => new Response(JSON.stringify({sandbox: {name: 'space-a', status: 'running', securityReady: true,
+    desktopState: {ready: false, connected: false, reason: 'stale', port: 5901}}}));
+  await assert.rejects(callTool('connection_info', {name: 'space-a'}, request), /console is not ready/);
+});
+
+test('dashboard desktop password: POST+CSRF only, relay password only, never created, gated on running+ready', async t => {
+  let consoleReady = true;
+  const f = fixture(t, {consoleCheck: () => consoleReady ? {ready: true, connected: true, reason: 'ready'} : {ready: false, connected: false, reason: 'stale'}});
+  const {c, root, fake} = f;
+  assert.equal((await action(c, 'space-desk', 'create')).status, 'succeeded');
+  const human = readFileSync(join(root, 'credentials/space-desk.vnc'), 'utf8');
+  const upstream = readFileSync(join(root, 'credentials/space-desk.vnc-upstream'), 'utf8');
+  const publicDir = join(root, 'public'); mkdirSync(publicDir);
+  const server = createServer(c, {publicDir});
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const request = (path, {method = 'POST', headers = {}, body = '{}'} = {}) => new Promise((resolve, reject) => {
+    const req = http.request({hostname: '127.0.0.1', port: server.address().port, path, method, headers: {host: '127.0.0.1:8787', ...headers}}, res => {
+      let text = ''; res.setEncoding('utf8'); res.on('data', d => text += d);
+      res.on('end', () => { let data; try { data = JSON.parse(text); } catch {} resolve({status: res.statusCode, headers: res.headers, data, text}); });
+    });
+    req.on('error', reject); req.end(method === 'GET' ? undefined : body);
+  });
+  const csrf = (await request('/api/state', {method: 'GET'})).data.csrfToken;
+  const ok = {'content-type': 'application/json', 'x-csrf-token': csrf};
+  const path = '/api/sandboxes/space-desk/desktop-password';
+  assert.equal((await request(path, {method: 'GET'})).status, 404);
+  assert.equal((await request(path, {headers: {'content-type': 'application/json'}})).status, 403);
+  assert.equal((await request(path, {headers: {...ok, origin: 'http://evil.example'}})).status, 403);
+  assert.equal((await request(path, {headers: ok, body: '{"extra":1}'})).status, 400);
+  const good = await request(path, {headers: ok});
+  assert.equal(good.status, 200); assert.equal(good.headers['cache-control'], 'no-store');
+  assert.deepEqual(good.data, {name: 'space-desk', port: 5901, password: human});
+  assert(!good.text.includes(upstream));
+  // State/listing endpoints still never carry the password.
+  assert(!(await request('/api/state', {method: 'GET'})).text.includes(human));
+  consoleReady = false;
+  assert.equal((await request(path, {headers: ok})).status, 409);
+  consoleReady = true;
+  fake.rows.find(v => v.name === 'space-desk').status = 'stopped'; c.snapshot = null;
+  assert.equal((await request(path, {headers: ok})).status, 409);
+  assert.equal((await request('/api/sandboxes/space-none/desktop-password', {headers: ok})).status, 404);
+  // Never mints a credential that does not already exist.
+  fake.rows.find(v => v.name === 'space-desk').status = 'running';
+  rmSync(join(root, 'credentials/space-desk.vnc'));
+  assert.equal((await request(path, {headers: ok})).status, 503);
+  assert(!existsSync(join(root, 'credentials/space-desk.vnc')));
+});
+
+test('dashboard desktop password is refused when remote desktop is disabled', async t => {
+  const {c} = fixture(t, {desktopEnabled: false});
+  assert.equal((await action(c, 'space-off', 'create')).status, 'succeeded');
+  await assert.rejects(c.desktopLogin('space-off'), /disabled/);
 });

@@ -32,7 +32,7 @@ These controls coordinate operations; they are **not** multi-user access permiss
 
 The API binds loopback and validates Host/Origin/CSRF. This protects a browser workflow, not against a malicious local user process. MCP HTTP adds bearer authentication and bounded request processing, and is loopback by default. Audit records are allowlisted metadata, never arbitrary commands or their arguments.
 
-Lume handles Apple Virtualization and optional desktop listening. `forward.mjs` is only a passive port-map reader: there is no additional retired TCP proxy daemon to start. VNC is not the same service as Apple's Screen Sharing inside a guest.
+Lume handles Apple Virtualization and optional native desktop upstream. `desktop-relay.mjs` launches the optional Python persistent-owner/RFB relay; see [its setup, readiness and quarantine contract](desktop-relay.md). `forward.mjs` remains only a passive port-map reader, not a service. VNC is not the same service as Apple's Screen Sharing inside a guest.
 
 ## Configuration and data
 
@@ -65,5 +65,5 @@ LaunchAgents run after the host user logs in. They are not a root boot-time serv
 - Add new operations to the API/controller, then thin MCP/CLI adapters and tests.
 - Avoid a generic host-shell tool; guest shell execution already provides full guest administration.
 - If adding reservations, enforce them server-side and consider existing desktop sessions and already-known credentials. A lock icon alone is not exclusive access.
-- If adding screenshots, use a maintained compatible VNC client and recheck VM survival after capture. Do not ship the minimal hand-written clients that crashed the prototype.
+- If adding screenshots, connect only to the public relay with a maintained compatible VNC client and recheck VM survival after capture. Never send human/raw-client reconnects or encoding lists directly to Apple's private VNC upstream. Unit tests are not proof of macOS stability. A private deployment passed a [bounded real-Mac acceptance run](../reports/reliability-2026-10-16.md); that does not verify a clean public installation or indefinite uptime.
 - Network containment requires a separately designed privileged backend and verification, not a few untested guest firewall commands.

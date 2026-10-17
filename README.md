@@ -27,7 +27,7 @@ space-2  STOPPED  no      no    8    14 GB   150 GB
 - **CLI:** `ls`, `ps`, `status`, and `exec`, including stdout/stderr separation and guest exit codes.
 - **macOS 27 / Golden Gate notes:** a repeatable template factory using an Apple-created working account, with first-login fixes inspired by upstream Lume PR #4027.
 - **A compact dashboard:** localhost-only; use an SSH tunnel when viewing from another computer.
-- **Optional remote desktop:** Lume's VNC viewer with one port and password per VM. Disabled by default.
+- **Optional remote desktop:** a persistent upstream owner and standard RFB relay, with separate human/native passwords per VM. Disabled by default; see [setup and failure policy](docs/desktop-relay.md) and the [bounded real-Mac acceptance result](reports/reliability-2026-10-16.md).
 - **Persistent state:** SQLite jobs, conservative crash recovery, key pinning, and private per-VM credentials.
 
 Not implemented: per-VM user permissions, exclusive reservations, hostile-guest network containment, snapshots, TTL cleanup, automatic restart after a host reboot, or an MCP screenshot/click tool.
@@ -141,7 +141,7 @@ See [MCP client examples](docs/mcp.md), [REST and CLI reference](docs/api.md), a
 
 - Controller API: `127.0.0.1:8787` only.
 - MCP HTTP: `127.0.0.1:8788` by default, bearer token required. Put HTTPS/Tailscale Serve or an SSH tunnel in front of it.
-- Remote desktop: **off by default**. Opt-in VNC uses legacy eight-character passwords and Lume may bind every host interface. An encrypted tunnel does not itself close the direct listener.
+- Remote desktop: **off by default**. Opt-in relay/native VNC uses separate legacy eight-character passwords and both listeners may bind every host interface. Firewall native ports 15901–15949 from remote access and restrict relay ports 5901–5949. An encrypted tunnel does not itself close either listener. A private deployment passed a [45.46-minute acceptance run](reports/reliability-2026-10-16.md); this is not a clean-install or indefinite-uptime guarantee.
 - Guest commands run as an administrator and may use passwordless `sudo`. Never give a token to someone you would not trust with all guest data and machines on the reachable network.
 - Runtime data stays outside the checkout. Do not attach its directory to public bug reports.
 

@@ -84,6 +84,12 @@ export function createServer(controller, { publicDir = join(dirname(fileURLToPat
           const body = await jsonBody(req, 32768); keys(body, ['command', 'timeoutSeconds']);
           return json(200, await controller.exec(execMatch[1], body.command, body.timeoutSeconds));
         }
+        // POST + CSRF (not GET) so the credential is never cacheable, prefetched or cross-site readable.
+        const desktopMatch = /^\/api\/sandboxes\/(space-[a-z0-9][a-z0-9-]{0,30})\/desktop-password$/.exec(url.pathname);
+        if (desktopMatch) {
+          const body = await jsonBody(req); keys(body, []);
+          return json(200, await controller.desktopLogin(desktopMatch[1]));
+        }
         const match = /^\/api\/sandboxes\/(space-[a-z0-9][a-z0-9-]{0,30})\/actions$/.exec(url.pathname);
         if (match) {
           const body = await jsonBody(req); keys(body, ['action', 'confirmation']);

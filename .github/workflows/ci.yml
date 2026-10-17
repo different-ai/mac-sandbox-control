@@ -25,3 +25,20 @@ jobs:
           find . -name '*.mjs' -not -path './.git/*' -print0 | xargs -0 -n 1 node --check
           sh -n provision.sh
           sh -n power.sh
+  desktop-unit:
+    # Loopback stub RFB + generated pixels only. Not real-Mac/VZ stability proof.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install optional desktop test dependencies
+        run: python -m pip install -r requirements-desktop.txt
+      - name: Relay unit tests (no VM, host or credentials)
+        run: PYTHONDONTWRITEBYTECODE=1 python -m unittest -v test_vnc_relay
+      - name: Desktop benchmark syntax
+        run: python -m py_compile scripts/benchmark-desktop.py

@@ -81,6 +81,7 @@ Default base: `http://127.0.0.1:8787`. Host and Origin checks are intentional; t
 | `POST /api/sandboxes` | `{name}`; enqueues creation |
 | `POST /api/sandboxes/:name/actions` | `{action}`; start/stop/kill/delete |
 | `POST /api/sandboxes/:name/exec` | `{command, timeoutSeconds}`; guest output and exit status |
+| `POST /api/sandboxes/:name/desktop-password` | `{}`; sensitive `{name, port, password}` for a provisioned, verified-running VM with a ready relay console |
 
 Mutation requests require `Content-Type: application/json` and `X-CSRF-Token` from a current `/api/state` response. Delete additionally needs `confirmation` equal to the exact sandbox name. The loopback API is trusted-local-process access, **not** per-user authentication.
 
@@ -88,7 +89,7 @@ A lifecycle response is HTTP 202 with `{job}`. Jobs are queued/running/succeeded
 
 Job read endpoints currently cover the most recent 100 jobs. This is not a complete historical pagination API.
 
-Names must match `space-[a-z0-9][a-z0-9-]{0,30}`. `exec` commands are limited to 16,384 characters and the API body limit still applies. Guest passwords/private keys are not returned by ordinary state routes. The authorized MCP `get_login` tool is intentionally sensitive.
+Names must match `space-[a-z0-9][a-z0-9-]{0,30}`. `exec` commands are limited to 16,384 characters and the API body limit still applies. Guest passwords/private keys are not returned by ordinary state routes. The authorized MCP `get_login` tool is intentionally sensitive. The dashboard's explicit POST-only `desktop-password` route is also sensitive: it requires CSRF protection, returns only the human relay password (not the native upstream or macOS account password), sets `Cache-Control: no-store`, and never creates missing credentials. Any remote dashboard gateway must authorize the person before forwarding this route; tailnet reachability alone is not per-user authorization.
 
 ## Interactive access
 

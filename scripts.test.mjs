@@ -33,6 +33,19 @@ test('setup help is side-effect-free and does not require a real VM or Lume', ()
   }
 });
 
+test('optional relay LaunchAgent uses Node host.env launcher and configured NODE_BIN', () => {
+  const relay = serviceEntries.find(service => service.desktopOnly);
+  assert.equal(relay.entry, 'desktop-relay.mjs');
+  const old = process.env.NODE_BIN;
+  process.env.NODE_BIN = '/example/custom-node';
+  try {
+    const plist = launchAgent(relay, '/example/private-state');
+    assert(plist.includes('/example/custom-node')); assert(plist.includes('--env-file-if-exists='));
+    assert(plist.includes('desktop-relay.mjs')); assert(!plist.includes('vnc_relay.py'));
+    assert(wrapper('desktop-relay.mjs').includes("export NODE_BIN='/example/custom-node'"));
+  } finally { if (old === undefined) delete process.env.NODE_BIN; else process.env.NODE_BIN = old; }
+});
+
 test('opt-in auto-login does not enable a separate guest Screen Sharing listener', () => {
   const script = desktopScript('spaceuser', 'fixture-only');
   assert(script.includes('/etc/kcpassword')); assert(!script.includes('com.apple.screensharing'));

@@ -33,7 +33,7 @@ Never forward MCP or VNC ports from a home router to the public internet.
 
 ## Remote desktop
 
-Desktop is opt-in (`SANDBOX_DESKTOP_ENABLED=1`). Lume's viewer is independent of permissions inside the guest and can show the boot/login screen. Its private Apple VNC implementation may listen on **all host interfaces** and uses a legacy password limited to eight characters. Do not assume display traffic is encrypted.
+Desktop is opt-in (`SANDBOX_DESKTOP_ENABLED=1`) and requires the [optional persistent relay](docs/desktop-relay.md). It is independent of permissions inside the guest and can show the boot/login screen. The relay (5901–5949) and private native upstream (15901–15949) may listen on **all host interfaces**, with distinct legacy eight-character passwords. Firewall native ports from remote access; never connect viewers directly to native upstream. Do not assume display traffic is encrypted.
 
 An SSH tunnel encrypts the tunnel; it does **not** close Lume's direct listener. Before enabling desktop, restrict access using an appropriate host firewall or dedicated trusted network. This repo does not install those restrictions for you.
 
@@ -41,7 +41,7 @@ The `--vnc-password` value currently has to be supplied to Lume in process argum
 
 Lume's upstream unattended installer can briefly enable its own VNC during template setup. Disabling normal desktop startup in this repo does not alter that upstream implementation. Bootstrap only on a trusted, isolated setup network.
 
-Minimal/custom VNC clients requesting some frame encodings were observed terminating the Lume process during the prototype. A successful TCP banner or password handshake is not proof of a usable desktop. `vncdotool` captured a full frame successfully; client compatibility and the current Lume/macOS build must be tested.
+Direct client reconnects and some encoding requests have terminated the Lume process during prototyping on macOS 27/Lume 0.6.1. The relay keeps one persistent vncdotool upstream connection per generation, consumes human encoding lists locally, and quarantines a lost upstream without reconnecting into the same VZ process. A private deployment passed a [45.46-minute acceptance run](reports/reliability-2026-10-16.md). This is bounded evidence, not an uptime guarantee or a clean-install validation of the public reference. A banner/authentication handshake alone is never desktop readiness. Drain desktop VMs before stopping/updating host services; an owner crash intentionally quarantines that generation.
 
 ## Credentials and automatic login
 

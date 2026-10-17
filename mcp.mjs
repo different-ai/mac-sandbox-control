@@ -7,8 +7,7 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { resolve, join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import {apiUrl, publicHost, stateRoot, desktopEnabled} from './config.mjs';
-import { readPorts } from './forward.mjs';
+import {apiUrl, publicHost, stateRoot} from './config.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import {describeSandboxes, filterSandboxes, stateCounts} from './sandbox-status.mjs';
 
@@ -114,8 +113,10 @@ export async function callTool(name, args = {}, request = fetch) {
     }
     case 'connection_info': {
       const sandbox = await readySandbox(args.name, request);
-      const port = desktopEnabled ? readPorts()[sandbox.name] : null;
-      return { name: sandbox.name, desktop: port ? `vnc://${HOST}:${port}` : null,
+      if (!sandbox.desktopState?.ready || !sandbox.desktopState?.connected) throw new ToolError('Desktop console is not ready; guest compute may still be running. Ask the host operator; do not connect to native VNC.');
+      const port = sandbox.desktopState.port;
+      if (!Number.isInteger(port) || port < 5901 || port > 5949) throw new ToolError('Desktop console port unavailable.');
+      return { name: sandbox.name, desktopState: sandbox.desktopState, desktop: `vnc://${HOST}:${port}`,
         how: port ? 'Open the desktop URL (Finder > Go > Connect to Server, or "open <url>"). It asks only for a password: use desktopPassword from get_login. The sandbox is already logged in as spaceuser.' : 'Desktop is disabled or unavailable; ask the host operator.' };
     }
     case 'get_login': {
@@ -125,8 +126,11 @@ export async function callTool(name, args = {}, request = fetch) {
       if (credential.verified !== true) throw new ToolError(`${sandbox.name} is not ready: provisioning did not complete.`);
       let desktopPassword = null;
       try { desktopPassword = readFileSync(join(STATE, 'credentials', sandbox.name + '.vnc'), 'utf8').trim(); } catch {}
-      const port = desktopEnabled ? readPorts()[sandbox.name] : null;
-      return { name: sandbox.name, desktop: port ? `vnc://${HOST}:${port}` : null, desktopPassword,
+      const health = sandbox.desktopState;
+      const port = sandbox.status === 'running' && health?.ready === true && health?.connected === true
+        && Number.isInteger(health.port) && health.port >= 5901 && health.port <= 5949 ? health.port : null;
+      return { name: sandbox.name, desktopState: health ?? {ready: false, connected: false, reason: 'unavailable', port: null},
+        desktop: port ? `vnc://${HOST}:${port}` : null, desktopPassword: port ? desktopPassword : null,
         macUsername: credential.username, macPassword: credential.password };
     }
     default: throw new ToolError('Unknown tool.');
