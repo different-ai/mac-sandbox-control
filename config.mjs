@@ -13,3 +13,4 @@ export const apiUrl = process.env.SANDBOX_API ?? 'http://127.0.0.1:8787';
 export const mcpBind = process.env.SANDBOX_MCP_BIND ?? '127.0.0.1';
 export const mcpPort = Number(process.env.SANDBOX_MCP_PORT ?? 8788);
 export const desktopEnabled = process.env.SANDBOX_DESKTOP_ENABLED === '1';
+export const desktopPython = process.env.SANDBOX_DESKTOP_PYTHON ?? path.join(home, '.local/share/mac-sandbox-control/desktop-venv/bin/python');

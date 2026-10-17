@@ -62,6 +62,18 @@ This uses host SSH permissions. Do not give every colleague a host admin shell j
 
 For a person who explicitly needs to sign in, call `get_login` and distinguish **desktopPassword** from **macPassword**. The former opens the VNC connection; the latter is the guest account password used inside a lock screen or sudo prompt. Neither is the host administrator password.
 
+## Create a workspace and open Screen Sharing
+
+1. Call `list_sandboxes` before changing anything. Only two guests may run at once; coordinate with other users rather than stopping their workspace.
+2. For a new name, call `create_sandbox({name: "space-example"})`. For an existing stopped, provisioned workspace, use `start_sandbox` instead.
+3. Observe the returned job using `wait_for_job({job_id: "<returned-id>"})` or `get_job`. Verify `state=running` and `canExec=true` afterward; a queued response is not readiness.
+4. If the optional [desktop relay](desktop-relay.md) is enabled, call `connection_info` and `get_login` for the workspace. Check console readiness independently of compute.
+5. On your Mac, open Finder → Go → Connect to Server (⌘K) and paste the returned relay URL. Alternatively run `open 'vnc://<reachable-host>:<returned-relay-port>'`. Use an operator-approved tailnet hostname or encrypted tunnel; do not assume a LAN `.local` name resolves remotely.
+6. Enter **desktopPassword**, not **macPassword**. The relay uses password-only VNC authentication; no username is needed. Never use the internal native upstream ports 15901–15949.
+7. Keep persistent work in the guest's home directory, not `/tmp`. Stop the guest to free a running slot; its disk remains. Starting boots macOS again rather than restoring RAM or live connections. Delete permanently removes the workspace.
+
+Named checkpoints and custom-workspace cloning are not exposed by this service yet. Ordinary stop/start persistence does not require a snapshot, and local VM disks are not off-host backups.
+
 ## Tool semantics
 
 `create_sandbox`, `start_sandbox`, `stop_sandbox`, `kill_sandbox`, and `delete_sandbox` return jobs. Use `wait_for_job`, and inspect actual VM state afterward. Do not report a queued request as complete.

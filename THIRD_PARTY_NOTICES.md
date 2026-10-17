@@ -30,6 +30,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## vncdotool
+
+The optional relay depends on [vncdotool](https://github.com/sibson/vncdotool) 1.4.2 by the vncdotool contributors, under the [MIT license](https://github.com/sibson/vncdotool/blob/v1.4.2/LICENSE.txt). No upstream library source is copied or bundled here. The relay subclasses its client to retain resized framebuffer request dimensions and handle valid empty updates. Dependencies installed separately retain their own licenses, including Pillow, Twisted and cryptography.
+
 ## Other software
 
 Node.js, macOS, Apple's Virtualization framework, Tailscale, OpenCode, Claude Code, and optional `vncdotool` have their own licenses and terms. They are not relicensed or bundled by this repository. In particular, this MIT license does not grant rights to redistribute a macOS restore image or bypass Apple's software-license requirements.

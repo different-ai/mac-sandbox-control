@@ -73,7 +73,7 @@ Each token currently has the same all-VM privileges. Distinct names are attribut
 
 ## Optional desktops
 
-Desktop sharing is off by default. Enabling it requires changing host configuration and starting/restarting the chosen stopped VM; it should not silently restart an in-use VM.
+Desktop sharing is off by default. Follow [optional Python/relay setup and drain rules](desktop-relay.md) before enabling it. Enabling it requires changing host configuration and starting the chosen stopped VM; it must not silently restart an in-use VM. Public ports 5901–5949 belong to the relay; native ports 15901–15949 are private upstream only, with separate passwords.
 
 ```text
 SANDBOX_DESKTOP_ENABLED=1
@@ -82,14 +82,14 @@ SANDBOX_PUBLIC_HOST=mac-host.example-tailnet.ts.net
 
 Use `connection_info` for the assigned desktop address and `get_login` only when the user needs the password. A desktop password is different from the macOS account password. Lume's viewer asks for the desktop password only; a lock screen inside it asks for the macOS account credentials.
 
-**Important:** Lume may still listen on every host interface. Advertising a Tailscale hostname does not bind the listener to Tailscale or remove LAN access. Use a suitable host firewall/dedicated trusted network before enabling desktops. This repository does not install a verified host policy.
+**Important:** relay and native upstream may listen on every host interface. Advertising a Tailscale hostname does not bind either listener to Tailscale or remove LAN access. Firewall native ports 15901–15949 from remote access and restrict relay ports 5901–5949 to approved clients before enabling desktops. This repository does not install a verified host policy. Never connect human viewers directly to native upstream.
 
 An SSH desktop tunnel can encrypt the connection:
 
 ```sh
-ssh -N -L 127.0.0.1:15901:127.0.0.1:5901 operator@mac-host.local
+ssh -N -L 127.0.0.1:25901:127.0.0.1:5901 operator@mac-host.local
 # On the client:
-open vnc://localhost:15901
+open vnc://localhost:25901
 ```
 
 But the tunnel does **not** close Lume's original direct listener. Protect that separately. Never include a password in the VNC URL.

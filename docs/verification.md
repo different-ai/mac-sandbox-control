@@ -58,6 +58,8 @@ Run this on a **dedicated test host and disposable guests**, not a colleague's a
 
 ### Optional desktop
 
+First complete [relay setup](desktop-relay.md). The tunnel below must terminate at a public relay port (5901–5949), never at a native upstream port. A private deployment passed a [45.46-minute acceptance run](../reports/reliability-2026-10-16.md); passing local/CI fixtures alone is not a real-Mac stability result, and a clean installation of this public reference is not yet verified.
+
 - [ ] Explicitly enable desktop, restrict host network access, and start a disposable guest.
 - [ ] Confirm the actual listening interfaces—not just the advertised hostname.
 - [ ] Authenticate with the **desktop** password; test wrong-password rejection.
@@ -79,7 +81,7 @@ os.umask(0o077)
 out = Path.home() / '.cache/mac-sandbox-control'
 out.mkdir(parents=True, exist_ok=True, mode=0o700)
 # Use the actual protected/tunneled desktop address. This example assumes an SSH tunnel.
-client = api.connect('127.0.0.1::15901', password=getpass.getpass('Desktop password: '), timeout=30)
+client = api.connect('127.0.0.1::25901', password=getpass.getpass('Desktop password: '), timeout=30)
 try:
     client.captureScreen(str(out / 'desktop.png'))
 finally:

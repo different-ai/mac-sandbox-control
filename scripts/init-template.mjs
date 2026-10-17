@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+import {parseLumeJSON} from '../lume-json.mjs';
 
 const args = process.argv.slice(2).filter((a, i) => !(i === 0 && a === '--'));
 if (args.includes('--help')) {
@@ -28,7 +29,7 @@ async function main() {
   const version = await run(c.lumeBin, ['--version']);
   if (!/(^|\n)0\.6\.1(\s|$)/.test(version.trim())) throw new Error('This factory is based on Lume 0.6.1. Revalidate other versions before adapting the check.');
   if (os.totalmem() < 20 * 2 ** 30 || os.cpus().length < 8) throw new Error('The default factory requires 8 CPU cores and at least 20 GiB RAM (14 guest + 6 host reserve).');
-  const inventory = JSON.parse(await run(c.lumeBin, ['ls', '--format', 'json']));
+  const inventory = parseLumeJSON(await run(c.lumeBin, ['ls', '--format', 'json']));
   if (inventory.some(v => v.name === vm)) throw new Error('macos-template already exists. Inspect it; this command will not overwrite or delete it.');
   if (inventory.some(v => v.status !== 'stopped')) throw new Error('Stop other VMs deliberately before running the factory. It will not stop them for you.');
   await fs.mkdir(c.stateRoot, {recursive: true, mode: 0o700});

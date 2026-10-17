@@ -10,37 +10,70 @@
 <body>
   <main>
     <header class="page-header">
-      <div class="title"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg><h1>Mac sandboxes</h1></div>
-      <div class="connection"><span class="dot" id="connection-dot"></span><span id="connection">Connecting</span></div>
+      <div>
+        <h1>Mac sandboxes</h1>
+        <p class="lede">Two can run at a time. Stopped sandboxes keep their files.</p>
+      </div>
+      <button id="create" class="primary" type="button" disabled>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New sandbox
+      </button>
     </header>
-    <section class="host" aria-label="Host capacity">
-      <div><span class="muted">Active slots</span><strong id="running">— / 2</strong></div>
-      <div><span class="muted">Allocated memory</span><strong id="memory">—</strong></div>
-      <div><span class="muted">Available storage</span><strong id="storage">—</strong></div>
-      <div><span class="muted">Host</span><strong id="host">Mac host</strong></div>
+
+    <section class="capacity" aria-label="Host capacity">
+      <div class="slots" id="slots" aria-hidden="true"><span></span><span></span></div>
+      <strong id="running">Checking…</strong>
+      <span class="muted" id="capacity-detail"></span>
+      <span class="spacer"></span>
+      <span class="status" id="connection-status"><span class="dot" id="connection-dot"></span><span id="connection">Connecting</span></span>
     </section>
-    <div class="notice" id="isolation"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span>LAN isolation not verified. Use trusted workloads only.</span></div>
-    <div class="notice" id="template-state" hidden>Template not ready. Creation is blocked until the host administrator verifies provisioning.</div>
-    <div class="section-heading"><h2>Sandboxes</h2><div><span id="slot-note" class="slot-note" hidden>Both slots in use. Stop a sandbox to create another.</span><button id="create" class="primary" disabled>Create sandbox</button></div></div>
-    <div id="error" role="alert" hidden></div>
-    <div id="sandboxes" aria-live="polite" aria-busy="true"><div class="skeleton"></div><div class="skeleton"></div></div>
-    <details class="activity"><summary>Recent activity <span id="job-count"></span></summary><ol id="jobs"></ol></details>
-    <footer><span id="verified">Not verified yet</span><span>Private access through SSH</span></footer>
+
+    <div id="error" class="error" role="alert" hidden></div>
+
+    <section class="panel" id="sandboxes" aria-live="polite" aria-busy="true">
+      <div class="skeleton"></div><div class="skeleton"></div>
+    </section>
+
+    <details class="activity">
+      <summary>Recent activity</summary>
+      <ol id="jobs"></ol>
+    </details>
+
+    <footer>
+      <span id="verified">Not verified yet</span>
+      <span id="isolation">Trusted workloads only · guest network isolation is not enabled</span>
+    </footer>
   </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
   <dialog id="create-dialog" aria-labelledby="create-title">
-    <form id="create-form">
-      <h2 id="create-title">Create sandbox</h2>
-      <label for="name">Name</label><input id="name" name="name" pattern="space-[a-z0-9][a-z0-9-]{0,30}" maxlength="37" required placeholder="space-3" autocomplete="off">
-      <p class="muted">8 CPU cores · 14 GB memory · 150 GB virtual disk</p>
-      <p class="muted">Network access is not restricted to the internet. Only run trusted workloads.</p>
-      <div class="dialog-actions"><button type="button" data-close="create-dialog">Cancel</button><button class="primary" type="submit">Create sandbox</button></div>
+    <form id="create-form" method="dialog">
+      <h2 id="create-title">New sandbox</h2>
+      <p class="muted">A fresh macOS workspace from the starter image. Usually ready in under a minute.</p>
+      <label for="name">Name</label>
+      <div class="prefixed"><span>space-</span><input id="name" name="name" pattern="[a-z0-9][a-z0-9-]{0,30}" maxlength="31" required placeholder="my-project" autocomplete="off" spellcheck="false"></div>
+      <p class="hint">Lowercase letters, numbers and hyphens · 8 cores · 14 GB memory · 150 GB disk</p>
+      <div class="dialog-actions"><button type="button" data-close="create-dialog">Cancel</button><button class="primary" type="submit">Create</button></div>
     </form>
   </dialog>
+
+  <dialog id="desktop-dialog" aria-labelledby="desktop-title">
+    <form id="desktop-form" method="dialog">
+      <h2 id="desktop-title">Open desktop</h2>
+      <p class="muted">Screen Sharing will ask for this password. No username is needed.</p>
+      <label for="desktop-password">Desktop password for <span id="desktop-name"></span></label>
+      <input id="desktop-password" class="secret" readonly autocomplete="off" spellcheck="false">
+      <div class="dialog-actions"><button type="button" data-close="desktop-dialog">Close</button><button type="button" id="desktop-copy">Copy</button><button class="primary" type="submit" id="desktop-open">Copy &amp; open</button></div>
+    </form>
+  </dialog>
+
   <dialog id="delete-dialog" aria-labelledby="delete-title">
-    <form id="delete-form">
-      <h2 id="delete-title">Delete sandbox</h2><p id="delete-warning"></p>
-      <label for="confirmation">Type the sandbox name to delete its files permanently</label><input id="confirmation" autocomplete="off" required>
-      <div class="dialog-actions"><button type="button" data-close="delete-dialog">Keep sandbox</button><button class="destructive" type="submit">Delete sandbox</button></div>
+    <form id="delete-form" method="dialog">
+      <h2 id="delete-title">Delete sandbox?</h2>
+      <p id="delete-warning" class="muted"></p>
+      <label for="confirmation">Type <strong id="delete-name"></strong> to confirm</label>
+      <input id="confirmation" autocomplete="off" spellcheck="false" required>
+      <div class="dialog-actions"><button type="button" data-close="delete-dialog">Keep it</button><button class="destructive-solid" type="submit">Delete permanently</button></div>
     </form>
   </dialog>
 </body>

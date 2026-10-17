@@ -1,5 +1,5 @@
 // Shared state vocabulary for MCP and both CLIs. Setup-ready is not running.
-const STATES = new Set(['running', 'stopped', 'starting', 'stopping', 'provisioning', 'pulling', 'suspended', 'missing', 'unknown']);
+const STATES = new Set(['running', 'stopped', 'starting', 'stopping', 'provisioning', 'pulling', 'suspended', 'crashed', 'missing', 'unknown']);
 export function describeSandbox(row, {verified = true, observedAt = null} = {}) {
   const raw = STATES.has(row.status) ? row.status : 'unknown';
   const known = verified && !['unknown', 'missing'].includes(raw);
@@ -7,20 +7,24 @@ export function describeSandbox(row, {verified = true, observedAt = null} = {}) 
   const state = !verified ? 'unknown' : starting && ['running', 'stopped'].includes(raw) ? 'starting' : raw;
   const ready = row.securityReady === true || row.ready === true;
   const running = known ? raw === 'running' : null;
-  const active = known ? starting || !['stopped', 'suspended'].includes(raw) : null;
+  // A crashed owner is not a safely settled workspace. Keep capacity and ps
+  // visibility conservative until an operator resolves its runtime metadata.
+  const active = known && raw !== 'crashed' ? starting || !['stopped', 'suspended'].includes(raw) : null;
   const canExec = running === true && ready && !starting && state === 'running';
   let note;
   if (!known) note = 'State could not be verified; do not assume this VM is stopped.';
+  else if (state === 'crashed') note = 'The recorded VM process exited or lost its identity. Commands are blocked; operator inspection is required.';
   else if (state === 'starting') note = 'Start is in progress. Wait for its job before executing commands.';
   else if (!ready) note = 'Credential setup is incomplete. Commands and login are blocked.';
-  else if (state === 'running') note = 'Running; command execution is allowed.';
+  else if (state === 'running') note = 'VM process is running; command execution may be attempted. Guest SSH health is not verified.';
   else if (state === 'stopped') note = 'Stopped. Start this sandbox before executing commands or connecting.';
   else if (state === 'stopping') note = 'Shutdown is in progress.';
   else note = 'Transition in progress; check the lifecycle job.';
   return {
     name: row.name, status: raw, state, active, running, ready, canExec, starting,
     cpu: row.cpu, memoryGiB: row.memoryGiB, diskGiB: row.diskGiB,
-    observedAt, note,
+    runtime: row.runtime ?? { processState: 'unknown', guestSsh: 'unverified' },
+    desktopState: row.desktopState ?? {ready: false, connected: false, reason: 'unavailable', port: null}, observedAt, note,
   };
 }
 export function describeSandboxes(rows, inventory = {}) {

@@ -3,12 +3,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { cpus, totalmem } from 'node:os';
-import {controlDir, storageRoot, lumeBin, appDir, desktopEnabled, publicHost as publicHostConfig} from './config.mjs';
+import {controlDir, storageRoot, lumeBin, appDir, desktopEnabled, stateRoot as stateRootConfig, publicHost as publicHostConfig} from './config.mjs';
 import { isIP } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmdirSync,
   statfsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createRuntimeInspector, unknownRuntime } from './runtime-health.mjs';
+import { parseLumeJSON } from './lume-json.mjs';
+import { inspectDesktopHealth } from './desktop-health.mjs';
 
 const execute = promisify(execFile);
 export const GiB = 1024 ** 3;
@@ -65,7 +68,7 @@ function acquireLock(stateDir) {
 // vncUrl, machine identifiers, directories, and command output never reach the API.
 export function parseInventory(stdout) {
   let rows;
-  try { rows = JSON.parse(stdout); } catch { throw new ControlError('Lume inventory is invalid.', 503); }
+  try { rows = parseLumeJSON(stdout); } catch { throw new ControlError('Lume inventory is invalid.', 503); }
   requireThat(Array.isArray(rows), 'Lume inventory is invalid.', 503);
   return rows.map(row => {
     const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -84,18 +87,26 @@ export class Controller {
     process.umask(0o077);
     this.stateDir = resolve(options.stateDir ?? controlDir);
     this.storage = resolve(options.storage ?? storageRoot);
-    this.readyFile = options.readyFile ?? join(dirname(this.stateDir), 'template-ready');
+    this.stateRoot = resolve(options.stateRoot ?? (options.stateDir ? dirname(this.stateDir) : stateRootConfig));
+    this.readyFile = options.readyFile ?? join(this.stateRoot, 'template-ready');
     this.lume = options.lume ?? lumeBin;
     this.provisioner = resolve(options.provisioner ?? process.env.SANDBOX_PROVISIONER ?? join(appDir, 'provision.sh'));
     this.powerHelper = resolve(options.powerHelper ?? process.env.SANDBOX_POWER_HELPER ?? join(appDir, 'power.sh'));
     this.runner = options.runner ?? ((file, args, config) => execute(file, args, config));
+    this.runtimeInspector = options.runtimeInspector ?? createRuntimeInspector();
+    this.inventoryGeneration = 0;
     this.resources = options.resources ?? (() => {
       const st = statfsSync(this.storage, { bigint: true });
       return { cpuTotal: cpus().length, memoryGiB: totalmem() / GiB, diskGiB: Number(st.bavail * st.bsize) / GiB,
         diskTotalGiB: Number(st.blocks * st.bsize) / GiB };
     });
     this.desktopEnabled = options.desktopEnabled ?? desktopEnabled;
-    this.bootTimeoutMs = options.bootTimeoutMs ?? 60_000;
+    this.consoleCheck = options.consoleCheck ?? inspectDesktopHealth;
+    this.guestProbe = options.guestProbe ?? (async (name) => {
+      try { const result = await this.exec(name, 'true', 10); return result.exitCode === 0 && !result.timedOut; }
+      catch { return false; }
+    });
+    this.bootTimeoutMs = options.bootTimeoutMs ?? 120_000;
     this.pollMs = options.pollMs ?? 500;
     this.paused = options.autoStart === false;
     mkdirSync(this.stateDir, { recursive: true, mode: 0o700 }); privatePath(this.stateDir, true);
@@ -154,6 +165,9 @@ export class Controller {
         let error = null;
         try { await this.perform(job); }
         catch (failure) { error = failure instanceof ControlError ? failure.message : 'Internal operation failed.'; }
+        // Also invalidates an in-flight refresh begun before this job finished.
+        this.inventoryGeneration++;
+        this.snapshot = null;
         this.db.prepare('UPDATE jobs SET status=?, finishedAt=?, error=? WHERE id=?').run(error ? 'failed' : 'succeeded', now(), error, job.id);
       }
     }).finally(() => {
@@ -174,7 +188,7 @@ export class Controller {
       const result = await this.runner(helper === 'provision' ? this.provisioner : helper === 'power' ? this.powerHelper : this.lume, args, {
         encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: helper || args[0] === 'clone' ? 30 * 60_000 : 35_000,
         killSignal: 'SIGKILL', windowsHide: true,
-        env: { ...process.env, SANDBOX_STATE_ROOT: dirname(this.stateDir), SANDBOX_STATE_DIR: this.stateDir, SANDBOX_DESKTOP_ENABLED: this.desktopEnabled ? '1' : '0', SANDBOX_VM_STORAGE: this.storage, LUME_BIN: this.lume },
+        env: { ...process.env, SANDBOX_STATE_ROOT: this.stateRoot, SANDBOX_STATE_DIR: this.stateDir, SANDBOX_DESKTOP_ENABLED: this.desktopEnabled ? '1' : '0', SANDBOX_VM_STORAGE: this.storage, LUME_BIN: this.lume },
       });
       return typeof result === 'string' ? result : result.stdout;
     } catch (error) {
@@ -192,7 +206,20 @@ export class Controller {
       throw new ControlError(`Command failed${code}.`, 503);
     }
   }
-  async inventory() { return parseInventory(await this.invoke(['ls', '--format', 'json'])); }
+  async inventory() {
+    const rows = parseInventory(await this.invoke(['ls', '--storage', this.storage, '--format', 'json']));
+    return Promise.all(rows.map(async row => {
+      let health;
+      try { health = await this.runtimeInspector(row, { storage: this.storage, lume: this.lume }); }
+      catch { health = unknownRuntime(); }
+      const expectedProcessState = { running: 'running', stopped: 'stopped', crashed: 'dead' };
+      const status = Object.hasOwn(expectedProcessState, health?.status) && health.processState === expectedProcessState[health.status]
+        ? health.status : 'unknown';
+      return { ...row, status, ipAddress: status === 'running' ? row.ipAddress : null,
+        runtime: { processState: ['running', 'stopped', 'dead', 'unknown'].includes(health?.processState) ? health.processState : 'unknown',
+          guestSsh: 'unverified' } };
+    }));
+  }
   vm(rows, name, optional = false) {
     const matches = rows.filter(vm => vm.name === name);
     requireThat(matches.length <= 1, 'VM name is ambiguous across Lume storage locations.');
@@ -214,8 +241,7 @@ export class Controller {
     requireThat(host.memoryGiB - used - 14 >= 6, 'At least 6 GiB host memory must remain reserved.');
     return host;
   }
-  async waitFor(name, status) {
-    const end = Date.now() + this.bootTimeoutMs;
+  async waitFor(name, status, end = Date.now() + this.bootTimeoutMs) {
     do {
       if (this.vm(await this.inventory(), name).status === status) return;
       if (Date.now() >= end) break;
@@ -235,11 +261,21 @@ export class Controller {
     await this.checkCapacity(rows, name);
     const desktop = this.desktopEnabled ? this.desktopFor(name) : null;
     this.db.prepare("UPDATE sandboxes SET reserved=1, stage='starting' WHERE name=?").run(name);
-    // Lume's built-in VNC server shows the VM display directly (independent of guest Screen Sharing).
+    // Native VNC is private upstream ONLY. Human clients always use the persistent relay.
     await this.invoke(['run', name, '--storage', this.storage, '--display', 'none',
-      ...(desktop ? ['--vnc', 'enabled', '--vnc-port', String(desktop.port), '--vnc-password', desktop.password] : ['--vnc', 'disabled']),
+      ...(desktop ? ['--vnc', 'enabled', '--vnc-port', String(desktop.port + 10000), '--vnc-password', desktop.upstreamPassword] : ['--vnc', 'disabled']),
       '--detach', '--log-file', '/dev/null']);
-    await this.waitFor(name, 'running');
+    const end = Date.now() + this.bootTimeoutMs;
+    await this.waitFor(name, 'running', end);
+    do {
+      const vm = this.vm(await this.inventory(), name);
+      let sshReady = false;
+      try { sshReady = vm.status === 'running' && await this.guestProbe(name, vm) === true; } catch {}
+      const consoleReady = !desktop || this.desktopHealth(name).ready;
+      if (Date.now() >= end) throw new ControlError('Guest SSH or desktop console not ready before timeout; no automatic retry.');
+      if (sshReady && consoleReady) break;
+      await delay(this.pollMs);
+    } while (true);
     this.db.prepare("UPDATE sandboxes SET reserved=0, stage='ready' WHERE name=?").run(name);
   }
   // Stable desktop port (5901-5949) and VNC password per sandbox; VNC passwords are 8 characters (protocol limit).
@@ -248,6 +284,7 @@ export class Controller {
     let ports = {};
     try { ports = JSON.parse(readFileSync(portsFile, 'utf8')); } catch {}
     let port = ports[name];
+    requireThat(port === undefined || Number.isInteger(port) && port >= 5901 && port <= 5949, 'Invalid desktop port allocation; inspect private state.', 503);
     if (!Number.isInteger(port)) {
       const used = new Set(Object.values(ports));
       for (let candidate = 5901; candidate <= 5949; candidate++) if (!used.has(candidate)) { port = candidate; break; }
@@ -255,17 +292,52 @@ export class Controller {
       ports[name] = port;
       writeFileSync(portsFile, JSON.stringify(ports, null, 2) + '\n', { mode: 0o600 });
     }
-    const credentials = join(dirname(this.stateDir), 'credentials');
+    const credentials = join(this.stateRoot, 'credentials');
     mkdirSync(credentials, { recursive: true, mode: 0o700 });
-    const file = join(credentials, name + '.vnc');
+    const credential = (suffix, differentFrom) => {
+      const file = join(credentials, name + suffix);
+      let password;
+      try { privatePath(file); password = readFileSync(file, 'utf8').trim(); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (!/^[A-Za-z0-9]{8}$/.test(password ?? '') || password === differentFrom) {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+        do { password = Array.from(randomBytes(8), b => alphabet[b % alphabet.length]).join(''); } while (password === differentFrom);
+        writeFileSync(file, password, { mode: 0o600 });
+      }
+      return password;
+    };
+    const password = credential('.vnc');
+    return { port, password, upstreamPassword: credential('.vnc-upstream', password) };
+  }
+  desktopHealth(name) {
+    if (!this.desktopEnabled) return {ready: false, connected: false, reason: 'disabled', port: null};
+    try {
+      const health = this.consoleCheck(name, {stateDir: this.stateDir, storage: this.storage, stateRoot: this.stateRoot});
+      // Explicit allowlist even for injected inspectors.
+      return {ready: health?.ready === true && health?.connected === true, connected: health?.connected === true,
+        reason: ['ready', 'stale', 'inventory-unverified', 'owner-unverified', 'generation-mismatch', 'not-ready', 'unallocated', 'unavailable'].includes(health?.reason) ? health.reason : 'unavailable',
+        port: this.readDesktopPort(name),
+        ...(Number.isFinite(health?.lastFrameAt) ? {lastFrameAt: health.lastFrameAt} : {}),
+        ...(Number.isSafeInteger(health?.frames) && health.frames >= 0 ? {frames: health.frames} : {})};
+    } catch { return {ready: false, connected: false, reason: 'unavailable', port: this.readDesktopPort(name)}; }
+  }
+  // Human relay password only — never the native upstream or macOS account password.
+  // Read-only: never creates or rotates credentials; requires a verified-running VM and a ready console.
+  async desktopLogin(name) {
+    requireThat(this.desktopEnabled, 'Remote desktop is disabled on this host.', 409);
+    const owned = this.owned(name);
+    requireThat(owned.securityReady === 1, 'Sandbox has not completed secure provisioning.', 409);
+    const vm = this.vm(await this.inventory(), name);
+    requireThat(vm.status === 'running', 'Start the sandbox before opening its desktop.', 409);
+    const desktop = this.desktopHealth(name);
+    requireThat(desktop.ready && Number.isInteger(desktop.port), 'Desktop console is not ready yet. Try again shortly.', 409);
     let password;
-    try { password = readFileSync(file, 'utf8').trim(); } catch {}
-    if (!/^[A-Za-z0-9]{8}$/.test(password ?? '')) {
-      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-      password = Array.from(randomBytes(8), b => alphabet[b % alphabet.length]).join('');
-      writeFileSync(file, password, { mode: 0o600 });
-    }
-    return { port, password };
+    try {
+      const file = join(this.stateRoot, 'credentials', name + '.vnc');
+      privatePath(file); password = readFileSync(file, 'utf8').trim();
+    } catch {}
+    requireThat(/^[A-Za-z0-9]{8}$/.test(password ?? ''), 'Desktop password is unavailable; inspect private state.', 503);
+    return { name, port: desktop.port, password };
   }
   readDesktopPort(name) {
     try {
@@ -274,13 +346,14 @@ export class Controller {
     } catch { return null; }
   }
   cleanupCredentials(name) {
-    const root = dirname(this.stateDir);
+    const root = this.stateRoot;
     for (const folder of ['keys', 'credentials']) {
       try { privatePath(join(root, folder), true); }
       catch (error) { if (error.code !== 'ENOENT') throw new ControlError('Credential cleanup needs operator inspection.', 503); }
     }
     const paths = [join(root, 'keys', name), join(root, 'keys', name + '.pub'),
-      join(root, name + '.known_hosts'), join(root, 'credentials', name + '.json'), join(root, 'credentials', name + '.vnc')];
+      join(root, name + '.known_hosts'), join(root, 'credentials', name + '.json'), join(root, 'credentials', name + '.vnc'),
+      join(root, 'credentials', name + '.vnc-upstream')];
     try {
       const portsFile = join(this.stateDir, 'desktop-ports.json');
       const ports = JSON.parse(readFileSync(portsFile, 'utf8'));
@@ -351,7 +424,7 @@ export class Controller {
     const timeout = Math.min(600, Math.max(1, Number.isInteger(timeoutSeconds) ? timeoutSeconds : 120));
     const vm = this.vm(await this.inventory(), name);
     requireThat(vm.status === 'running' && vm.ipAddress, `${name} is not running. Start it first.`);
-    const root = dirname(this.stateDir);
+    const root = this.stateRoot;
     let user;
     try { user = JSON.parse(readFileSync(join(root, 'credentials', name + '.json'), 'utf8')).username; } catch { user = null; }
     requireThat(typeof user === 'string' && /^[a-z_][a-z0-9_-]{0,31}$/.test(user), 'Sandbox account information unavailable.', 503);
@@ -371,15 +444,16 @@ export class Controller {
   }
   async state() {
     // Only inventory/resources are cached. Durable job state and newly registered records are always live.
-    if (!this.snapshot || Date.now() - this.snapshot.at >= 3000) {
+    while (!this.snapshot || this.snapshot.generation !== this.inventoryGeneration || Date.now() - this.snapshot.at >= 3000) {
       this.refreshing ??= (async () => {
+        const generation = this.inventoryGeneration;
         let rows = [], host = { cpuTotal: cpus().length, memoryGiB: totalmem() / GiB, diskGiB: null }, error = null;
         try { rows = await this.inventory(); host = { ...host, ...await this.resources() }; }
         catch (failure) { error = failure instanceof ControlError ? failure.message : 'Host resources unavailable.'; }
         const templates = rows.filter(vm => vm.name === TEMPLATE);
         const templateReady = !error && this.templateReady() && templates.length === 1
           && templates[0].status === 'stopped' && templates[0].os === 'macos' && templates[0].diskGiB === 150;
-        this.snapshot = { at: Date.now(), rows, host, error, templateReady };
+        this.snapshot = { at: Date.now(), generation, rows, host, error, templateReady };
       })().finally(() => { this.refreshing = null; });
       await this.refreshing;
     }
@@ -389,6 +463,8 @@ export class Controller {
       const vm = row.claimed && matches.length === 1 ? matches[0] : null;
       return { name: row.name, createdAt: row.createdAt, securityReady: row.securityReady === 1,
         stage: row.stage, starting: row.reserved === 1, status: error ? 'unknown' : vm?.status ?? (matches.length ? 'unknown' : 'missing'),
+        runtime: vm?.runtime ?? { processState: 'unknown', guestSsh: 'unverified' },
+        desktopState: this.desktopHealth(row.name),
         cpu: vm?.cpu ?? 8, memoryGiB: vm?.memoryGiB ?? 14, diskGiB: vm?.diskGiB ?? 150, ipAddress: vm?.ipAddress ?? null, desktopPort: this.desktopEnabled ? this.readDesktopPort(row.name) : null };
     });
     return { host: { ...host, diskAvailableGiB: host.diskGiB }, policy: { maxRunning: 2, networkIsolationVerified: false, templateReady, desktopEnabled: this.desktopEnabled }, publicHost: publicHostConfig, sandboxes,

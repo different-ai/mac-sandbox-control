@@ -32,19 +32,21 @@ export async function loadHostConfig() {
 export const serviceEntries = [
   {label: 'io.github.mac-sandbox-control.api', entry: 'server.mjs', log: 'controller'},
   {label: 'io.github.mac-sandbox-control.mcp', entry: 'mcp-http.mjs', log: 'mcp-http'},
+  {label: 'io.github.mac-sandbox-control.desktop-relay', entry: 'desktop-relay.mjs', log: 'desktop-relay', desktopOnly: true},
 ];
 export function wrapper(entry, {environment = false} = {}) {
   const envArg = environment ? ' ' + shellQuote('--env-file-if-exists=' + hostEnv) : '';
-  return '#!/bin/sh\nexport NODE_BIN=' + shellQuote(process.execPath) + '\nexec "$NODE_BIN"' + envArg + ' ' + shellQuote(path.join(root, entry)) + ' "$@"\n';
+  return '#!/bin/sh\nexport NODE_BIN=' + shellQuote(process.env.NODE_BIN ?? process.execPath) + '\nexec "$NODE_BIN"' + envArg + ' ' + shellQuote(path.join(root, entry)) + ' "$@"\n';
 }
 export function launchAgent(service, stateRoot) {
-  const values = [process.execPath, '--env-file-if-exists=' + hostEnv, path.join(root, service.entry)];
+  const node = process.env.NODE_BIN ?? process.execPath;
+  const values = [node, '--env-file-if-exists=' + hostEnv, path.join(root, service.entry)];
   return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n' +
     '<key>Label</key><string>' + xml(service.label) + '</string>\n' +
     '<key>ProgramArguments</key><array>' + values.map(v => '<string>' + xml(v) + '</string>').join('') + '</array>\n' +
     '<key>WorkingDirectory</key><string>' + xml(root) + '</string>\n' +
-    '<key>EnvironmentVariables</key><dict><key>NODE_BIN</key><string>' + xml(process.execPath) + '</string>' +
-    '<key>PATH</key><string>' + xml(path.dirname(process.execPath) + ':' + path.join(os.homedir(), '.local/bin') + ':/usr/bin:/bin:/usr/sbin:/sbin') + '</string></dict>\n' +
+    '<key>EnvironmentVariables</key><dict><key>NODE_BIN</key><string>' + xml(node) + '</string>' +
+    '<key>PATH</key><string>' + xml(path.dirname(node) + ':' + path.join(os.homedir(), '.local/bin') + ':/usr/bin:/bin:/usr/sbin:/sbin') + '</string></dict>\n' +
     '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string>\n' +
     '<key>StandardOutPath</key><string>' + xml(path.join(stateRoot, service.log + '.log')) + '</string>\n' +
     '<key>StandardErrorPath</key><string>' + xml(path.join(stateRoot, service.log + '-error.log')) + '</string>\n</dict></plist>\n';

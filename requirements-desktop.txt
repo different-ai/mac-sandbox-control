@@ -1,0 +1,5 @@
+# Optional desktop relay; Python 3.12. No Python is downloaded by host:install.
+vncdotool==1.4.2
+cryptography==50.0.2
+Pillow==13.0.0
+Twisted==26.4.0

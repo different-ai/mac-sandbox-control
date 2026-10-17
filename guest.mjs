@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
+import {parseLumeJSON} from './lume-json.mjs';
 
 export const USER = 'spaceuser';
 import {home, stateRoot as state, appDir as app, lumeBin as lume, storageRoot as storage} from './config.mjs';
@@ -36,7 +37,7 @@ export function run(file, args, input = '', timeout = 90000) {
   });
 }
 export async function vmInfo(vm) {
-  const data = JSON.parse(await run(lume, ['get', vm, '--format', 'json', '--storage', storage]));
+  const data = parseLumeJSON(await run(lume, ['get', vm, '--format', 'json', '--storage', storage]));
   return Array.isArray(data) ? data[0] : data;
 }
 export function sshArgs(ip, key, hosts, alias, command, user = USER) {

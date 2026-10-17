@@ -3,6 +3,7 @@ import {stateRoot as state, lumeBin as lume, storageRoot as storage} from './con
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
+import {parseLumeJSON} from './lume-json.mjs';
 process.umask(0o077);
 async function main() {
 const name = process.argv[2];
@@ -18,7 +19,7 @@ function run(file, args, input = '', timeout = 20000) {
     child.stdin.on('error', () => {}); child.stdin.end(input);
   });
 }
-async function info() {const result = JSON.parse(await run(lume, ['get', name, '--format', 'json', '--storage', storage])); return Array.isArray(result) ? result[0] : result;}
+async function info() {const result = parseLumeJSON(await run(lume, ['get', name, '--format', 'json', '--storage', storage])); return Array.isArray(result) ? result[0] : result;}
 const vm = await info();
 if (vm.status !== 'running') {console.log('Sandbox is already stopped.'); process.exit(0);}
 if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(vm.ipAddress || '')) throw new Error('Guest IP unavailable.');

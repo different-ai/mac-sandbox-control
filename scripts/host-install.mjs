@@ -21,6 +21,7 @@ try {
   for (const file of ['provision.sh', 'power.sh']) await fs.chmod(path.join(root, file), 0o755);
   const agents = path.join(os.homedir(), 'Library/LaunchAgents');
   for (const service of serviceEntries) {
+    if (service.desktopOnly && !c.desktopEnabled) continue;
     const file = path.join(agents, service.label + '.plist');
     await installFile(file, launchAgent(service, c.stateRoot), 0o600);
     execFileSync('/usr/bin/plutil', ['-lint', file], {stdio: 'ignore'});
